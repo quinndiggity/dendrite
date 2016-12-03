@@ -31,12 +31,14 @@ CREATE TABLE events (
     -- Since many different events will have the same state we separate the
     -- state into a separate table.
     state_nid           bigint DEFAULT NULL,
+    -- Whether the event is a state event
+    is_state boolean NOT NULL,
+    -- Whether the event has been redacted.
+    is_redacted boolean NOT NULL,
     -- The textual event id.
     event_id            text NOT NULL,
     -- The sha256 reference hash for the event.
     reference_sha256    bytea NOT NULL,
-    -- Whether the event has been redacted.
-    is_redacted boolean NOT NULL,
     -- An event may only appear in this table once.
     UNIQUE (event_id)
 );
@@ -57,7 +59,7 @@ CREATE TABLE event_json (
 CREATE TABLE state (
     state_nid bigint NOT NULL PRIMARY KEY,
     -- CBOR list of state_nids
-    state_delta_nids bytea NOT NULL,
+    state_parent_nids bytea NOT NULL,
     -- CBOR map of (type -> state_key -> event_nid)
     state_data bytea NOT NULL
 );
