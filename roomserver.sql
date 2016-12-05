@@ -24,8 +24,8 @@ CREATE TABLE events (
     -- Local numeric ID for the room the event is in.
     room_nid            bigint NOT NULL,
     -- The depth of the event in the room taken from the "depth" key of the
-    -- event JSON. This is NULL if the event is an outlier.
-    depth               bigint NULL,
+    -- event JSON.
+    depth               bigint NOT NULL,
     -- Local numeric ID for the state at the event.
     -- This is NULL if we don't know the state at the event.
     -- Since many different events will have the same state we separate the
