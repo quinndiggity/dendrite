@@ -1,77 +1,94 @@
+-- A room holds information about the rooms this server has data for.
 CREATE TABLE rooms (
     -- Local numeric ID for the room.
-    room_nid bigint NOT NULL,
+    room_nid bigint NOT NULL PRIMARY KEY,
     -- Textual ID for the room.
     room_id text NOT NULL,
-    -- The current state of the room.
-    state_nid bigint NOT NULL,
-    -- The current active contiguous regions.
-    -- There can be more than one active contiguous region if the room is
-    -- forked. A fork happens when a server sends us new events that cannot
-    -- be joined to this contiguous region. This should not happen under normal
-    -- operation.
-    -- New events can reference multiple contiguous regions. The event will be
-    -- assigned the lowest active contiguous region of its ancestors.
-    contiguous_region_nids bigint[] DEFAULT NULL,
-    -- Is the room alive? A room is alive if this server is joined to the room.
-    is_alive boolean NOT NULL,
+    -- The current state of the room or NULL if the server is no longer joined
+    -- to the room.
+    state_nid bigint DEFAULT NULL,
+    -- The current active region or NULL if the server is no longer joined to
+    -- the room.
+    active_region_nid bigint DEFAULT NULL,
     -- A room may only appear in this table once.
     UNIQUE (room_id)
 );
 
--- A contiguous_regions is a chunk of the event graph for a room where all the
--- events are connected. That is every event either has a "prev_event" in the
--- region or is a "prev_event" of an event in the region.
-CREATE TABLE contiguous_regions (
-    -- Local numeric ID for the contiguous_region
-    contiguous_region_nid NOT NULL,
-    -- Back reference to the room_id this contiguous_region is for.
-    -- Unused in normal operation, but potentially useful for background work.
-    room_nid            bigint NOT NULL,
-    -- List of new events that are not referenced by any event in this region.
-    forward_edges bigint[] NOT NULL,
-    -- List of events in this contigous region that reference an event that is
-    -- not in this contiguous region.
-    backward_edges bigint[] NOT NULL
+-- A region is a block of events in a room. that grows forward as new events
+-- are received by the server and grows backwards as the server pulls in new
+-- events over backfill.
+-- There can only be one active region for a room at any given time. A region
+-- is created whenever the server joins a room. That region becomes the active
+-- region until the server leaves the room.
+-- When the server leaves the room the region is retained so that is remains
+-- possible to iterate through the events from that time.
+-- When the room is rejoined a new region will be created.
+-- If the new region is backfilled far enough to collide with the old region
+-- then it will use the old region to backfill the new region.
+-- The events in the old region will now be in both regions, but will have
+-- different positions in each.
+CREATE TABLE regions (
+    -- Local numeric ID for the region
+    region_nid NOT NULL PRIMARY KEY,
+    -- The room_nid this region is for.
+    room_nid bigint NOT NULL,
+    -- List of new events that are not referenced by any event in this room.
+    forward_edge_nids bigint[] NOT NULL,
+    -- List of event_ids referenced by an event in this contiguous region that
+    -- are not referenced by an event in the region.
+    backward_edge_ids string[] NOT NULL
 );
 
--- The events table holds the meta-data for each event. The
+-- The events table holds metadata for each event, the actual JSON is stored
+-- separately to keep the size of the rows small.
 CREATE TABLE events (
-    -- Local numeric ID for the event. Postitive IDs are used for new events,
-    -- negative IDs are used for backfilled events and outliers.
-    event_nid           bigint NOT NULL PRIMARY KEY,
+    -- Local numeric ID for the event.
+    bigint NOT NULL PRIMARY KEY,
     -- Local numeric ID for the room the event is in.
-    room_nid            bigint NOT NULL,
-    -- The contiguous_region this event belongs to.
-    -- This can be NULL if the event is an outlier.
-    contiguous_region_nid bigint DEFAULT NULL,
+    room_nid bigint NOT NULL,
     -- The depth of the event in the room taken from the "depth" key of the
     -- event JSON, corrected to be bigger than the "depth" of the events that
     -- preceeded it.
-    corrected_depth     bigint NOT NULL,
+    -- It is not always possible to correct the depth since we do not always
+    -- have copies of the ancestors.
+    corrected_depth bigint NOT NULL,
     -- Local numeric ID for the state at the event.
     -- This is NULL if we don't know the state at the event.
     -- If the state is not NULL this this event is part of the contiguous
     -- part of the event graph
     -- Since many different events will have the same state we separate the
     -- state into a separate table.
-    state_nid           bigint DEFAULT NULL,
+    state_nid bigint DEFAULT NULL,
     -- Whether the event is a state event
     is_state boolean NOT NULL,
     -- Whether the event has been redacted.
     is_redacted boolean NOT NULL,
     -- The textual event id.
-    event_id            text NOT NULL,
+    event_id text NOT NULL,
     -- The sha256 reference hash for the event.
-    reference_sha256    bytea NOT NULL,
+    reference_sha256 bytea NOT NULL,
     -- An event may only appear in this table once.
     UNIQUE (event_id)
 );
 
--- Create an index by depth on each contiguous portion of the event graph.
-CREATE INDEX event_depth
-    ON events (contiguous_region_nid, corrected_depth, event_nid)
-    WHERE contiguous_region_nid IS NOT NULL;
+-- The event_positions table records the positions of events within a region.
+-- An event can be part of more than one region.
+-- For example a server could leave a room, then rejoin the same room later,
+-- then backfill until it reached the events it had already received for the
+-- room.
+-- A region can be used as a consitent view into a mostly contiguous section
+-- of the room.
+CREATE TABLE event_positions (
+    -- The numeric ID for the contiguous_region the ordering is for.
+    contiguous_region_nid bigint NOT NULL,
+    -- The position of the event in the contiguous_region. Postitive IDs are
+    -- used for new events, negative IDs are used for backfilled events.
+    event_position bigint NOT NULL,
+    -- The numeric ID of the event.
+    event_nid bigint NOT NULL,
+    -- Each event should have a different position in a region.
+    UNIQUE (contiguous_region_nid, event_position)
+);
 
 -- Stores the JSON for each event. This kept separate from the main events
 -- table to keep the rows in the main events table small.

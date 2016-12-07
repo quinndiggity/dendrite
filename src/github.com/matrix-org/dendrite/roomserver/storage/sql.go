@@ -112,12 +112,13 @@ func (s *stmts) prepare(db *sql.DB) (err error) {
 		"SELECT event_nid, event_json FROM event_json" +
 			" WHERE event_id = ANY($1)",
 	)
-	s.selectStateParentsStmt = p(
-		"SELECT state_nid, state_parent_nids FROM state" +
+	s.selectStateDataNIDsStmt = p(
+		"SELECT state_nid, state_data_nids FROM state" +
 			" WHERE state_nid = ANY($1)",
 	)
 	s.selectStateDataStmt = p(
-		"SELECT state_nid, state_data FROM state WHERE state_nid = ANY($1)",
+		"SELECT state_data_nid, state_data FROM state_data" +
+			" WHERE state_data_nid = ANY($1)",
 	)
 	s.insertRoomStmt = p(
 		"INSERT INTO rooms (room_nid, room_id, state_nid, forward_edges," +
