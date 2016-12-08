@@ -4,12 +4,12 @@ CREATE TABLE rooms (
     room_nid bigint NOT NULL PRIMARY KEY,
     -- Textual ID for the room.
     room_id text NOT NULL,
-    -- The current state of the room or NULL if the server is no longer joined
+    -- The current state of the room or 0 if the server is no longer joined
     -- to the room.
-    state_nid bigint DEFAULT NULL,
-    -- The current active region or NULL if the server is no longer joined to
+    state_nid bigint NOT NULL DEFAULT 0,
+    -- The current active region or 0 if the server is no longer joined to
     -- the room.
-    active_region_nid bigint DEFAULT NULL,
+    active_region_nid bigint NOT NULL DEFAULT 0,
     -- A room may only appear in this table once.
     UNIQUE (room_id)
 );
@@ -53,12 +53,12 @@ CREATE TABLE events (
     -- have copies of the ancestors.
     corrected_depth bigint NOT NULL,
     -- Local numeric ID for the state at the event.
-    -- This is NULL if we don't know the state at the event.
-    -- If the state is not NULL this this event is part of the contiguous
+    -- This is 0 if we don't know the state at the event.
+    -- If the state is not 0 this this event is part of the contiguous
     -- part of the event graph
     -- Since many different events will have the same state we separate the
     -- state into a separate table.
-    state_nid bigint DEFAULT NULL,
+    state_nid bigint NOT NULL,
     -- Whether the event is a state event
     is_state boolean NOT NULL,
     -- Whether the event has been redacted.

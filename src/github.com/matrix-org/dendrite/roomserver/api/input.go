@@ -1,4 +1,4 @@
-package roomserver
+package api
 
 type EventID string
 type EventJSON []byte
@@ -9,12 +9,18 @@ const (
 	// These events are state events used to authenticate other events.
 	// They can become part of the contiguous event graph via backfill.
 	KindOutlier = 0
-	// New Events extend the contiguous graph going forwards.
-	// They always have state.
-	KindNew = 1
+	// Join events start a new contiguous event graph. The first event
+	// in the list must be a m.room.memeber event joining this server to
+	// the room. There must be a copy of the
+	KindJoin = 1
+	// New events extend the contiguous graph going forwards.
+	// They usually don't need state, but may include state if the
+	// there was a new event that references an event that we don't
+	// have a copy of.
+	KindNew = 2
 	// Backfilled events extend the contiguous graph going backwards.
 	// They always have state.
-	KindBackfill = 2
+	KindBackfill = 3
 )
 
 type InputEvents struct {
@@ -38,26 +44,4 @@ type InputPurgeHistory struct {
 type InputRedact struct {
 	// List of events to redact.
 	EventIDs []EventID
-}
-
-type QueryEventExistsRequest struct {
-}
-
-type QueryEventJSONRequest struct {
-	EventIDs []EventID
-}
-
-type QueryEventsResponse struct {
-	// Bitmap of
-	Exists []byte
-	Events []EventJSON
-	Auth   [][]EventID
-	State  [][]EventID
-}
-
-type QueryStateRequest struct {
-}
-
-type QueryStateResponse struct {
-	State map[EventID][]EventID
 }
