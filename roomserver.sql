@@ -32,10 +32,10 @@ CREATE TABLE regions (
     region_nid NOT NULL PRIMARY KEY,
     -- The room_nid this region is for.
     room_nid bigint NOT NULL,
-    -- List of new events that are not referenced by any event in this room.
+    -- List of new events that are not referenced by any event in this region.
     forward_edge_nids bigint[] NOT NULL,
-    -- List of event_ids referenced by an event in this contiguous region that
-    -- are not referenced by an event in the region.
+    -- List of event_ids referenced by an event in this region that are not in
+    -- the region.
     backward_edge_ids string[] NOT NULL
 );
 
@@ -51,7 +51,12 @@ CREATE TABLE events (
     -- preceeded it.
     -- It is not always possible to correct the depth since we do not always
     -- have copies of the ancestors.
+    -- Needed for assigning depth when sending new events.
     corrected_depth bigint NOT NULL,
+    -- The "depth" key of the event in the room taken directly from the "depth"
+    -- key of the event.
+    -- Needed for state resolution.
+    depth bigint NOT NULL,
     -- Local numeric ID for the state at the event.
     -- This is 0 if we don't know the state at the event.
     -- If the state is not 0 this this event is part of the contiguous
@@ -59,13 +64,32 @@ CREATE TABLE events (
     -- Since many different events will have the same state we separate the
     -- state into a separate table.
     state_nid bigint NOT NULL,
-    -- Whether the event is a state event
-    is_state boolean NOT NULL,
+    -- Local numeric ID for the type of the event.
+    -- Well known event types are pre-assigned numeric IDs:
+    --   1 -> m.room.create
+    --   2 -> m.room.power_levels
+    --   3 -> m.room.join_rules
+    --   4 -> m.room.member
+    -- Picking well-known numeric IDs for the events types that require
+    -- special attention during state conflict resolution means that we
+    -- write that code using numeric constants.
+    -- It also means that the numeric IDs for common event types should
+    -- be consistent between different instances which might make ad-hoc
+    -- debugging easier.
+    event_type_nid bigint NOT NULL,
+    -- The state_key for the event or 0 if the event is not a state event.
+    -- Well known state keys are pre-assigned numeric IDs:
+    --   1 -> "" (the empty string)
+    event_state_key_nid bigint NOT NULL,
     -- Whether the event has been redacted.
+    -- TODO: Work out how redactions will actually work.
     is_redacted boolean NOT NULL,
     -- The textual event id.
+    -- Used to lookup the numeric ID when processing requests.
+    -- Needed for state resolution.
     event_id text NOT NULL,
     -- The sha256 reference hash for the event.
+    -- Needed for setting reference hashes when sending new events.
     reference_sha256 bytea NOT NULL,
     -- An event may only appear in this table once.
     UNIQUE (event_id)
@@ -102,26 +126,62 @@ CREATE TABLE event_json (
     event_json text NOT NULL
 );
 
+-- Numeric versions of the event "type"s. Event types tend to be taken from a
+-- small common pool. Assigning each a numeric ID should reduce the amount of
+-- data that needs to be stored and fetched from the database.
+-- It also means that many operations can work with int64 arrays rather than
+-- string arrays which may help reduce GC pressure.
+CREATE TABLE event_types (
+    -- Local numeric ID for the event type.
+    event_type_nid bigint NOT NULL PRIMARY KEY,
+    -- The string event_type.
+    event_type text NOT NULL,
+    UNIQUE (event_type)
+);
+
+-- Numeric versions of the event "state_key"s. State keys tend to be reused so
+-- assigning each string a numeric ID should reduce the amount of data that
+-- needs to be stored and fetched from the database.
+-- It also means that many operations can work with int64 arrays rather than
+-- string arrays which may help reduce GC pressure.
+CREATE TABLE event_state_keys (
+    -- Local numeric ID for the state key.
+    event_state_key_nid bigint NOT NULL PRIMARY KEY,
+    event_state_key text NOT NULL,
+    UNIQUE (event_state_key)
+);
+
 -- The state of a room before an event.
 -- Stored as a list of state_data entries stored in a separate table.
+-- The state could be stored in a single state_data entry but matrix rooms
+-- tend to accumulate small changes over time so it's more efficient to encode
+-- the state as deltas.
+-- If the list of deltas becomes too long it may become more efficient to
+-- the full state under single state_data_nid.
 CREATE TABLE state (
     -- Local numeric ID for the state.
     state_nid bigint NOT NULL PRIMARY KEY,
     -- Local numeric ID of the room this state is for.
     -- Unused in normal operation, but potentially useful for background work.
     room_nid bigint NOT NULL,
-    -- How many times this is referenced in the events table.
-    reference_count bigint NOT NULL,
-    -- list of state_data_nids
+    -- list of state_data_nids, stored sorted by state_data_nid.
     state_data_nids bigint[] NOT NULL,
 );
 
--- The state data map stored as CBOR map of (type -> state_key -> event_nid).
+-- The state data map.
+-- Designed to give enough information to run the state resolution algorithm
+-- without hitting the database in the common case.
+-- TODO: Is it worth replacing the unique btree index with a covering index so
+-- that postgres could lookup the state using an index-only scan?
+-- The type and state_key are included in the index to make it easier to
+-- lookup a specific (type, state_key) pair for an event. It also makes it easy
+-- to read the state for a given state_data_nid ordered by (type, state_key)
+-- which in turn makes it easier to merge state data blocks.
 CREATE TABLE state_data (
     -- Local numeric ID for this state data.
-    state_data_nid bigint NOT NULL PRIMARY KEY,
-    -- How many times this is referenced in the state table.
-    reference_count bigint NOT NULL,
-    -- CBOR map of (type -> state_key -> event_nid)
-    state_data bytea NOT NULL
+    state_data_nid bigint NOT NULL,
+    event_type_nid bigint NOT NULL,
+    event_state_key_nid bigint NOT NULL,
+    event_nid bigint NOT NULL,
+    UNIQUE (state_data_nid, event_type_nid, event_state_key_nid)
 );
