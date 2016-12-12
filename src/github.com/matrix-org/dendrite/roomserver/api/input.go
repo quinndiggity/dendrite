@@ -20,15 +20,14 @@ const (
 	KindBackfill = 3
 )
 
-type InputEvents struct {
+type InputEvent struct {
 	// Whether these events are new, backfilled or outliers.
 	Kind int
 	// The event JSON for each event to add.
-	Events []EventJSON
-	// Optional list of state events forming the intial state for the
-	// backward extremities.
+	Event EventJSON
+	// Optional list of state events forming the state before this event.
 	// These state events must have already been persisted.
-	State map[EventID][]EventID
+	State []string
 }
 
 type InputPurgeHistory struct {
@@ -40,5 +39,5 @@ type InputPurgeHistory struct {
 
 type InputRedact struct {
 	// List of events to redact.
-	EventIDs []EventID
+	EventIDs []string
 }

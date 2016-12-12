@@ -7,6 +7,19 @@ import (
 	"sort"
 )
 
+type StateEntry struct {
+	EventTypeNID     int64
+	EventStateKeyNID int64
+	EventNID         int64
+}
+
+type StateAtEvent struct {
+	// The state before the event.
+	BeforeStateID int64
+	// The state entry for the event itself.
+	EventStateEntry StateEntry
+}
+
 type InputEventHandlerDatabase interface {
 	CreateRoomLock(roomID string) (unlock func())
 	ActivateRoomLock(roomNID int64) (unlock func())
@@ -19,12 +32,8 @@ type InputEventHandlerDatabase interface {
 	// Returns 0 if we don't have a numeric ID for that room.
 	RoomNID(roomID string) (int64, error)
 
-	// Lookup the state at each
-	GetEventStates(eventNIDs []string) (results []struct {
-		EventNID int64
-		StateNID int64
-		IsState  bool
-	}, err error)
+	// Lookup the state at each event.
+	StateAtEvents(eventIDs []string) ([]StateAtEvent, error)
 
 	// Assign numeric IDs for each of the events.
 	// If the events are new this will asigne a new ID.
@@ -41,82 +50,97 @@ type InputEventHandlerDatabase interface {
 	// Lookup the numeric event IDs for the given string event IDs.
 	// If some of the events are missing then the returned list
 	// will be smaller than the requested list.
-	EventNIDs(eventIDs []string) ([]struct {
-		EventID  string
-		EventNID int64
-	}, error)
+	StateEventNIDs(eventIDs []string) ([]StateEntry, error)
+
+	// Lookup the numeric active region ID for a given numeric room ID.
+	// Returns 0 if we don't have an active region for that room
+	ActiveRegionNID(roomNID int64) (int64, error)
 }
 
 type InputEventHandler struct {
 	db InputEventHandlerDatabase
 }
 
-func (h *InputEventHandler) Handle(input *api.InputEvents) error {
-	// 0) Check that we have some events
-	if len(input.Events) == 0 {
-		return fmt.Errorf("Asked to add 0 events")
-	}
-
-	// 1) Parse the events and check they all have the same roomID.
-	// 2) Check that we have all the state events and find their numeric IDs
-	roomID, events, states, err := h.prepareEvents(input)
+func (h *InputEventHandler) Handle(input *api.InputEvent) error {
+	// 1) Check that the event is valid JSON and check that we have all the
+	//    necessary state to process the event:
+	//     a) If the input specifies the state before the event then check that
+	//        all the referenced state has been persisted.
+	//     b) If the input is of kind Outlier check that either the state
+	//        before the event is specified in the input or we have the state
+	//        for all of the prev_events.
+	roomID, event, err := h.prepareState(input)
 	if err != nil {
 		return err
 	}
 
-	// 3) Check whether the room exists. If the room doesn't exist then create
-	// the room if it's appropriate to do so.
+	// 2) Check whether the room exists. If the room doesn't exist then create
+	//    the room if it's appropriate to do so.
 	roomNID, err := h.prepareRoom(input.Kind, roomID)
 	if err != nil {
 		return err
 	}
 
-	// 4) Insert the events and assign them NIDs.
-	err = h.insertEvents(roomNID, events)
+	// 3) Insert the event and assign it a NID.
+	err = h.insertEvent(roomNID, event)
 
-	// 5) If the events are outliers then we've done enough.
+	// 4) If the events are outliers then we've done enough.
 	if input.Kind == api.KindOutlier {
 		return nil
 	}
 
-	// 4) Check if we have the necessary state if the event's aren't outliers
+	// 5) Store the state for before the event. If the state wasn't given in
+	//    input then we will need to calculate it from the prev_events.
 
-	// 4) Work out the state at each event.
+	// 6) Get the active region for the room and update it with the event.
+	//    If the input is of kind Join then we may need to create a new region.
+	//    If the input is of kind Backfill then we add the event to old end of
+	//    the region, otherwise we add the event to the new end of the region.
 
 	// 4) Get the active region if necessary.
 	// Outlier events don't need an active region.
+	return nil
 }
 
-func (h *InputEventHandler) prepareEvents(input *api.InputEvents) (
-	roomID string, events []event, err error,
+func (h *InputEventHandler) prepareState(input *api.InputEvent) (
+	roomID string, event event, err error,
 ) {
-	events = make([]event, len(input.Events))
-	for i, eventJSON := range input.Events {
-		// Parse the event JSON.
-		event := &events[i]
-		event.Raw = eventJSON
-		if err = json.Unmarshal(event.Raw, event); err != nil {
+	// Parse the event JSON.
+	event.raw = input.Event
+	if err = json.Unmarshal(event.raw, event); err != nil {
+		return
+	}
+
+	roomID = event.RoomID
+
+	if input.State != nil {
+		event.stateBefore, err = h.db.StateEventNIDs(input.State)
+		if err != nil {
 			return
 		}
 
-		// Check that the string roomID is consistent.
-		if i == 0 {
-			roomID = event.RoomID
-		} else if event.RoomID != roomID {
-			err = fmt.Errorf("All events must have the same room ID: %q != %q", roomID, event.RoomID)
+		if len(event.stateBefore) != len(input.State) {
+			err = fmt.Errorf("Missing necessary state event for %q", event.EventID)
 			return
 		}
+	} else {
+		prevEventIDs := make([]string, len(event.PrevEvents))
+		for i, prevEvent := range event.PrevEvents {
+			prevEventIDs[i] = prevEvent.EventID
+		}
+		sort.Strings(prevEventIDs)
+		// Remove duplicates prev_events. Do we need to do this?
+		// Should we allow duplicate prev_event entries in the same event?
+		prevEventIDs = unique(prevEventIDs)
 
-		// Check that we have all the referenced state events
-		if stateIDs, exists := input.State[event.EventID]; exists {
-			event.StateEventNIDs, err = h.db.EventNIDs(stateIDs)
-			if err != nil {
-				return
-			}
-			if len(event.StateEventNIDs) != len(stateIDs) {
-				err = fmt.Errorf("Missing necessary state event ID for %q", event.EventID)
-				return
-			}
+		// Look up the states for the prevEvents.
+		event.stateAtPrevEvents, err = h.db.StateAtEvents(prevEventIDs)
+		if err != nil {
+			return
+		}
+		if len(event.stateAtPrevEvents) != len(prevEventIDs) {
+			err = fmt.Errorf("Missing necessary state at prev_event for %q", event.EventID)
+			return
 		}
 	}
 	return
@@ -148,47 +172,9 @@ func (h *InputEventHandler) prepareRoom(kind int, roomID string) (roomNID int64,
 	return
 }
 
-func (h *InputEventHandler) checkStates(events []event) {
-	// Work out which string event IDs we need state for.
-	eventIDs := make([]string, len(events))
-	prevEventIDs := make([]string, 0, 2*len(events))
-	for i, event := range events {
-		eventsIDs[i] = event.EventID
-		if event.StateEventNIDs == nil {
-			// We weren't supplied with the state at this event.
-			// So we'll need to calculate it using the state for each of the
-			// "prev_events" of this event.
-			for _, prevEvent := range event.PrevEvents {
-				prevEventIDs = append(prevEventIDs, prevEvent.EventID)
-			}
-		}
-	}
-	sort.Strings(eventIDs)
-	sort.Strings(prevEventIDs)
-	eventIDs = unique(eventIDs)
-	// We only need to look up the numeric IDs for the events that aren't in
-	// this block, since we learned their numeric IDs when we inserted them.
-	prevEventIDs = difference(unique(requiredPrevEventIDs), eventIDs)
-
-	// Fetch both the required state and the state for the eventIDs we are
-	// adding in case we already have some state for those events.
-	states, err := h.db.GetEventStates(append(requiredStateEventIDS, eventIDs))
-
-	// Check that we have states for all the event IDs we need state for.
-	for _, eventID := range requiredStateEventIDs {
-		// The states are sorted by eventID so we can use a binary search here.
-		i = sort.Search(len(states), func(i int) {
-			return states[i].EventID >= eventId
-		})
-		if i == len(state) || states[i].EventID != eventID {
-			return fmt.Errorf("Missing for previous event ID: %q", eventID)
-		}
-	}
-}
-
-type stateAtEvent struct {
-	StateNID      int64
-	PrevEventNIDs []int64
+func (h *InputEventHandler) insertEvent(roomNID int64, event event) error {
+	// TODO: insert the event.
+	return nil
 }
 
 // unique removes duplicate elements from a sorted slice.
@@ -211,40 +197,16 @@ func unique(a []string) []string {
 	return a[:j]
 }
 
-// difference returns all the elements that are in the first sorted slice
-// that aren't in the second sorted slice.
-func difference(a, b []string) []string {
-	result := make([]string, 0, len(a))
-	for {
-		if len(a) == 0 {
-			return result
-		}
-		if len(b) == 0 {
-			return append(result, a...)
-		}
-		valueA := a[0]
-		valueB := b[0]
-		if valueA < valueB {
-			result = append(result, valueA)
-			a = a[1:]
-		} else {
-			b = b[1:]
-			if valueA == valueB {
-				a = a[1:]
-			}
-		}
-	}
-}
-
 func (h *InputEventHandler) prepareRegion(kind int, roomNID int64) (regionNID int64, err error) {
 	// Check if the room has a region without holding a lock.
-	regionNID, err = h.db.ActiveRegion(roomNID)
+	regionNID, err = h.db.ActiveRegionNID(roomNID)
 	if err != nil || regionNID != 0 {
 		return
 	}
 	// The room doesn't have an active region. Check if we should make one.
-	if input.Kind != api.KindJoin {
+	if kind != api.KindJoin {
 		err = fmt.Errorf("A room can only be actived by a Join: %d", roomNID)
+		return
 	}
 	return
 }
@@ -256,14 +218,18 @@ type eventReference struct {
 
 func (er *eventReference) UnmarshallJSON([]byte) error {
 	// TODO: implement this.
+	return nil
 }
 
 type event struct {
 	// Copy of the raw JSON.
 	raw []byte `json:"-"`
 	// The state event numeric IDs at the event or nil if none were provided.
-	stateEventNIDs []int64 `json:"-"`
-	eventNID       int64
+	stateBefore []StateEntry `json:"-"`
+	// The state entry information for this event.
+	eventStateEntry StateEntry `json:"-"`
+	// The state for each of the prev events if needed.
+	stateAtPrevEvents []StateAtEvent `json:"-"`
 	// The event_id. We need this so that we can check if we already have this
 	// event in the room.
 	EventID string `json:"event_id"`
