@@ -107,7 +107,7 @@ func (h *InputEventHandler) prepareState(input *api.InputEvent) (
 ) {
 	// Parse the event JSON.
 	event.raw = input.Event
-	if err = json.Unmarshal(event.raw, event); err != nil {
+	if err = json.Unmarshal(event.raw, &event); err != nil {
 		return
 	}
 
