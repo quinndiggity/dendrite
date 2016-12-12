@@ -1,4 +1,4 @@
-package API
+package api
 
 type RoomID string
 type EventID string

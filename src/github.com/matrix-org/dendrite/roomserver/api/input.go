@@ -1,8 +1,5 @@
 package api
 
-type EventID string
-type EventJSON []byte
-
 const (
 	// Outlier events fall outside the contiguous event graph.
 	// We do not have the state for these events.

@@ -28,7 +28,7 @@ type QueryEventJSONResponse struct {
 // for a room. This can be used to send an event into the room.
 type QueryRoomStateRequest struct {
 	// The ID of the room to return.
-	RoomID String
+	RoomID string
 	// Filter the state of the room to particular types and state keys.
 	// If the list is empty then return all state types and keys.
 	State []struct {

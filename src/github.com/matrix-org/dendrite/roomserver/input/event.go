@@ -2,6 +2,7 @@ package input
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/matrix-org/dendrite/roomserver/api"
 	"sort"
 )
@@ -71,7 +72,7 @@ func (h *InputEventHandler) Handle(input *api.InputEvents) error {
 	}
 
 	// 4) Insert the events and assign them NIDs.
-	err := h.insertEvents(roomNID, events)
+	err = h.insertEvents(roomNID, events)
 
 	// 5) If the events are outliers then we've done enough.
 	if input.Kind == api.KindOutlier {
@@ -137,12 +138,12 @@ func (h *InputEventHandler) prepareRoom(kind int, roomID string) (roomNID int64,
 	unlock := h.db.CreateRoomLock(roomID)
 	defer unlock()
 	// Check that there still isn't an ID now that we hold the lock.
-	roomNID, err := h.db.RoomNID(roomID)
+	roomNID, err = h.db.RoomNID(roomID)
 	if err != nil || roomNID != 0 {
 		return
 	}
 	// The room doesn't exist so create it.
-	roomNID := h.db.NextRoomNID()
+	roomNID = h.db.NextRoomNID()
 	err = h.db.InsertNewRoom(roomNID, roomID)
 	return
 }
@@ -188,7 +189,6 @@ func (h *InputEventHandler) checkStates(events []event) {
 type stateAtEvent struct {
 	StateNID      int64
 	PrevEventNIDs []int64
-	Updates
 }
 
 // unique removes duplicate elements from a sorted slice.
@@ -264,7 +264,6 @@ type event struct {
 	// The state event numeric IDs at the event or nil if none were provided.
 	stateEventNIDs []int64 `json:"-"`
 	eventNID       int64
-	state
 	// The event_id. We need this so that we can check if we already have this
 	// event in the room.
 	EventID string `json:"event_id"`
