@@ -29,21 +29,21 @@ CREATE TABLE rooms (
 -- different positions in each.
 CREATE TABLE regions (
     -- Local numeric ID for the region
-    region_nid NOT NULL PRIMARY KEY,
+    region_nid bigint NOT NULL PRIMARY KEY,
     -- The room_nid this region is for.
     room_nid bigint NOT NULL,
     -- List of new events that are not referenced by any event in this region.
     forward_edge_nids bigint[] NOT NULL,
     -- List of event_ids referenced by an event in this region that are not in
     -- the region.
-    backward_edge_ids string[] NOT NULL
+    backward_edge_ids text[] NOT NULL
 );
 
 -- The events table holds metadata for each event, the actual JSON is stored
 -- separately to keep the size of the rows small.
 CREATE TABLE events (
     -- Local numeric ID for the event.
-    bigint NOT NULL PRIMARY KEY,
+    event_nid bigint NOT NULL PRIMARY KEY,
     -- Local numeric ID for the room the event is in.
     room_nid bigint NOT NULL,
     -- The depth of the event in the room taken from the "depth" key of the
@@ -165,7 +165,7 @@ CREATE TABLE state (
     -- Unused in normal operation, but potentially useful for background work.
     room_nid bigint NOT NULL,
     -- list of state_data_nids, stored sorted by state_data_nid.
-    state_data_nids bigint[] NOT NULL,
+    state_data_nids bigint[] NOT NULL
 );
 
 -- The state data map.
