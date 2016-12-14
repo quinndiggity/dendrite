@@ -5,14 +5,11 @@ import (
 	"fmt"
 	_ "github.com/lib/pq"
 	"github.com/matrix-org/dendrite/roomserver/types"
-	"sync"
 )
 
 type Database struct {
 	stmts
-	db              *sql.DB
-	createRoomMutex sync.Mutex
-	maxRoomNID      int64
+	db *sql.DB
 }
 
 func (d *Database) Open(dataSourceName string) (err error) {
@@ -22,25 +19,11 @@ func (d *Database) Open(dataSourceName string) (err error) {
 	if err = d.prepare(d.db); err != nil {
 		return
 	}
-	if d.maxRoomNID, err = d.selectMaxRoomNID(); err != nil {
-		return
-	}
 	return
 }
 
 func (d *Database) CreateNewRoom(roomID string) (roomNID int64, err error) {
-	d.createRoomMutex.Lock()
-	defer d.createRoomMutex.Unlock()
-	// Check that another thread didn't try to create the room while we
-	// were waiting to claim the lock.
-	roomNID, err = d.selectRoomNID(roomID)
-	if err != nil || roomNID != 0 {
-		return
-	}
-	d.maxRoomNID++
-	roomNID = d.maxRoomNID
-	err = d.insertRoom(roomNID, roomID)
-	return
+	return d.insertRoomNID(roomID)
 }
 
 func (d *Database) RoomNID(roomID string) (int64, error) {
@@ -55,6 +38,42 @@ func (d *Database) StateAtEvents(eventIDs []string) ([]types.StateAtEvent, error
 func (d *Database) StateEventNIDs(eventIDs []string) ([]types.StateEntry, error) {
 	// TODO: Cache.
 	return d.selectStateEvents(eventIDs)
+}
+
+func (d *Database) AddEvent(eventJSON []byte, eventID string, roomNID, depth int64, eventType string, eventStateKey *string) (result types.StateEntry, err error) {
+	if result.EventTypeNID, err = d.assignEventTypeNID(eventType); err != nil {
+		return
+	}
+	if eventStateKey != nil {
+		if result.EventStateKeyNID, err = d.assignEventStateKeyNID(*eventStateKey); err != nil {
+			return
+		}
+	}
+	if result.EventNID, err = d.insertEvent(
+		eventID, roomNID, depth, result.EventTypeNID, result.EventStateKeyNID,
+	); err != nil {
+		return
+	}
+	err = d.insertEventJSON(result.EventNID, eventJSON)
+	return
+}
+
+func (d *Database) assignEventTypeNID(eventType string) (eventTypeNID int64, err error) {
+	// TODO: Cache.
+	eventTypeNID, err = d.selectEventTypeNID(eventType)
+	if err != nil || eventTypeNID != 0 {
+		return
+	}
+	return d.insertEventTypeNID(eventType)
+}
+
+func (d *Database) assignEventStateKeyNID(eventStateKey string) (eventStateKeyNID int64, err error) {
+	// TODO: Cache.
+	eventStateKeyNID, err = d.selectEventStateKeyNID(eventStateKey)
+	if err != nil || eventStateKeyNID != 0 {
+		return
+	}
+	return d.insertEventStateKeyNID(eventStateKey)
 }
 
 func (d *Database) ActiveRegionNID(roomNID int64) (int64, error) {

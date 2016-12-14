@@ -25,6 +25,12 @@ type InputEventHandlerDatabase interface {
 	// will be smaller than the requested list.
 	StateEventNIDs(eventIDs []string) ([]types.StateEntry, error)
 
+	// Add a new event to the database.
+	// Returns the numeric ID assigned to the event ID, type and state_key.
+	// If the state_key is nil then the event is not a state_event and the
+	// eventStateKeyNID will be 0.
+	AddEvent(eventJSON []byte, eventID string, roomNID, depth int64, eventType string, eventStateKey *string) (types.StateEntry, error)
+
 	// Lookup the numeric active region ID for a given numeric room ID.
 	// Returns 0 if we don't have an active region for that room
 	ActiveRegionNID(roomNID int64) (int64, error)
@@ -148,8 +154,11 @@ func (h *InputEventHandler) prepareRoom(kind int, roomID string) (roomNID int64,
 }
 
 func (h *InputEventHandler) insertEvent(roomNID int64, event event) error {
-	// TODO: insert the event.
-	return nil
+	_, err := h.db.AddEvent(
+		event.raw, event.EventID, roomNID, event.Depth,
+		event.Type, event.StateKey,
+	)
+	return err
 }
 
 // unique removes duplicate elements from a sorted slice.
@@ -223,7 +232,7 @@ type event struct {
 	// The type of the event. Needed for state conflict resolution.
 	Type string `json:"type"`
 	// The depth of the event. Needed for working out the corrected depth.
-	Depth int `json:"depth"`
+	Depth int64 `json:"depth"`
 	// The state_key if present. Needed for state conflict resolution and to
 	// know if the event is a state event.
 	StateKey *string `json:"state_key"`
