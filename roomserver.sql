@@ -85,7 +85,7 @@ CREATE TABLE events (
 -- For example a server could leave a room, then rejoin the same room later,
 -- then backfill until it reached the events it had already received for the
 -- room.
--- A region can be used as a consitent view into a mostly contiguous section
+-- A region can be used as a consistent view into a mostly contiguous section
 -- of the room.
 CREATE TABLE event_positions (
     -- The numeric ID for the contiguous_region the ordering is for.

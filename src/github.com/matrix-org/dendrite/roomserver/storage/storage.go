@@ -40,7 +40,7 @@ func (d *Database) StateEventNIDs(eventIDs []string) ([]types.StateEntry, error)
 	return d.selectStateEvents(eventIDs)
 }
 
-func (d *Database) AddEvent(eventJSON []byte, eventID string, roomNID, depth int64, eventType string, eventStateKey *string) (result types.StateEntry, err error) {
+func (d *Database) AddEvent(eventJSON []byte, eventID string, roomNID, depth int64, eventType string, eventStateKey *string) (result types.StateAtEvent, err error) {
 	if result.EventTypeNID, err = d.assignEventTypeNID(eventType); err != nil {
 		return
 	}
@@ -49,7 +49,7 @@ func (d *Database) AddEvent(eventJSON []byte, eventID string, roomNID, depth int
 			return
 		}
 	}
-	if result.EventNID, err = d.insertEvent(
+	if result.EventNID, result.BeforeStateNID, err = d.insertEvent(
 		eventID, roomNID, depth, result.EventTypeNID, result.EventStateKeyNID,
 	); err != nil {
 		return
@@ -74,6 +74,14 @@ func (d *Database) assignEventStateKeyNID(eventStateKey string) (eventStateKeyNI
 		return
 	}
 	return d.insertEventStateKeyNID(eventStateKey)
+}
+
+func (d *Database) StateDataNIDs(stateNIDs []int64) ([]types.StateDataNIDList, error) {
+	panic(fmt.Errorf("Not implemented"))
+}
+
+func (d *Database) StateEntries(stateDataNIDs []int64) ([]types.StateEntryList, error) {
+	panic(fmt.Errorf("Not implemented"))
 }
 
 func (d *Database) ActiveRegionNID(roomNID int64) (int64, error) {

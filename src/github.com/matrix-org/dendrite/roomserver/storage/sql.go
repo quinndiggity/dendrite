@@ -69,7 +69,7 @@ func (s *stmts) prepare(db *sql.DB) (err error) {
 			" VALUES ($1, $2, $3, $4, $5)" +
 			" ON CONFLICT ON CONSTRAINT event_id_unique" +
 			" DO UPDATE SET event_id = $1" +
-			" RETURNING (event_nid)",
+			" RETURNING event_nid, state_nid",
 	)
 	s.insertEventJSONStmt = p(
 		"INSERT INTO event_json (event_nid, event_json) VALUES ($1, $2)" +
@@ -108,7 +108,7 @@ func (s *stmts) selectStateAtEventIDs(eventIDs []string) (results []types.StateA
 			&result.EventNID,
 			&result.EventTypeNID,
 			&result.EventStateKeyNID,
-			&result.BeforeStateID,
+			&result.BeforeStateNID,
 		); err != nil {
 			return
 		}
@@ -152,8 +152,8 @@ func (s *stmts) selectEventStateKeyNID(eventStateKey string) (eventStateKeyNID i
 	return queryOneInt64(s.selectEventStateKeyNIDStmt, eventStateKey)
 }
 
-func (s *stmts) insertEvent(eventID string, roomNID, depth, eventTypeNID, eventStateKeyNID int64) (eventNID int64, err error) {
-	err = s.insertEventStmt.QueryRow(eventID, roomNID, depth, eventTypeNID, eventStateKeyNID).Scan(&eventNID)
+func (s *stmts) insertEvent(eventID string, roomNID, depth, eventTypeNID, eventStateKeyNID int64) (eventNID int64, stateNID int64, err error) {
+	err = s.insertEventStmt.QueryRow(eventID, roomNID, depth, eventTypeNID, eventStateKeyNID).Scan(&eventNID, &stateNID)
 	return
 }
 

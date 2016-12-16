@@ -29,7 +29,7 @@ type InputEventHandlerDatabase interface {
 	// Returns the numeric ID assigned to the event ID, type and state_key.
 	// If the state_key is nil then the event is not a state_event and the
 	// eventStateKeyNID will be 0.
-	AddEvent(eventJSON []byte, eventID string, roomNID, depth int64, eventType string, eventStateKey *string) (types.StateEntry, error)
+	AddEvent(eventJSON []byte, eventID string, roomNID, depth int64, eventType string, eventStateKey *string) (types.StateAtEvent, error)
 
 	// Lookup the numeric active region ID for a given numeric room ID.
 	// Returns 0 if we don't have an active region for that room
@@ -37,6 +37,14 @@ type InputEventHandlerDatabase interface {
 
 	// Add a new Region to the database.
 	CreateNewActiveRegion(roomNID, stateNID int64, forward, backward []int64) (int64, error)
+
+	// Lookup the numeric state data IDs for the each numeric state ID
+	// The returned slice is sorted by numeric state ID.
+	StateDataNIDs(stateNIDs []int64) ([]types.StateDataNIDList, error)
+
+	// Lookup the state data for each numeric state data ID
+	// The returned slice is sorted by numeric state data ID.
+	StateEntries(stateDataNIDs []int64) ([]types.StateEntryList, error)
 }
 
 type InputEventHandler struct {
@@ -68,7 +76,10 @@ func (h *InputEventHandler) Handle(input *api.InputEvent) error {
 	}
 
 	// 3) Insert the event and assign it a NID.
-	err = h.insertEvent(roomNID, event)
+	err = h.storeEvent(roomNID, event)
+	if err != nil {
+		return err
+	}
 
 	// 4) If the events are outliers then we've done enough.
 	if input.Kind == api.KindOutlier {
@@ -77,6 +88,10 @@ func (h *InputEventHandler) Handle(input *api.InputEvent) error {
 
 	// 5) Store the state for before the event. If the state wasn't given in
 	//    input then we will need to calculate it from the prev_events.
+	err = h.handleState(event)
+	if err != nil {
+		return err
+	}
 
 	// 6) Get the active region for the room and update it with the event.
 	//    If the input is of kind Join then we may need to create a new region.
@@ -122,7 +137,8 @@ func (h *InputEventHandler) prepareState(input *api.InputEvent) (
 		sort.Strings(prevEventIDs)
 		// Remove duplicates prev_events. Do we need to do this?
 		// Should we allow duplicate prev_event entries in the same event?
-		prevEventIDs = unique(prevEventIDs)
+		// If we don't deduplicate the prev_events then the length check below will fail.
+		prevEventIDs = prevEventIDs[:unique(sort.StringSlice(prevEventIDs))]
 
 		// Look up the states for the prevEvents.
 		event.stateAtPrevEvents, err = h.db.StateAtEvents(prevEventIDs)
@@ -153,32 +169,189 @@ func (h *InputEventHandler) prepareRoom(kind int, roomID string) (roomNID int64,
 	return
 }
 
-func (h *InputEventHandler) insertEvent(roomNID int64, event event) error {
-	_, err := h.db.AddEvent(
+func (h *InputEventHandler) storeEvent(roomNID int64, event event) (err error) {
+	event.stateAtEvent, err = h.db.AddEvent(
 		event.raw, event.EventID, roomNID, event.Depth,
 		event.Type, event.StateKey,
 	)
-	return err
+	return
 }
 
-// unique removes duplicate elements from a sorted slice.
-// Modifes the slice in-place O(n)
-func unique(a []string) []string {
-	if len(a) == 0 {
+func (h *InputEventHandler) handleState(event event) error {
+	if event.stateAtEvent.BeforeStateNID != 0 {
+		// 1) Happy days, we have already stored state for the event.
 		return nil
 	}
-	lastValue := a[0]
-	var j int
-	for _, value := range a {
-		if value != lastValue {
-			a[j] = lastValue
-			lastValue = value
+	if event.stateBefore != nil {
+		return nil
+
+		// 2) We've been given the state, we just need to store it.
+		panic(fmt.Errorf("handleState: Not implemented 2"))
+		return nil
+	}
+	// We need to work out the state using the supplied information.
+	prevStates := uniquePrevStates(event)
+	if len(prevStates) == 1 {
+		prevState := prevStates[0]
+		if prevState.EventStateKeyNID == 0 {
+			// 3) None of the previous events were state events and they all
+			// have the same state, so this event has exactly the same state
+			// as the previous events.
+			// This should be the common case.
+			panic(fmt.Errorf("handleState: Not implemented 3"))
+			return nil
+		}
+		// 4) The previous event was a state event so we need to store a copy
+		// of the previous state updated with that event.
+		panic(fmt.Errorf("handleState: Not implemented 4"))
+		return nil
+	}
+	if len(prevStates) == 0 {
+		// 5) There weren't any prev_events for this event so the state is
+		// empty.
+		panic(fmt.Errorf("handleState: Not implemented 5"))
+		return nil
+	}
+	// Conflict resolution.
+	// First stage: load the state maps for the prev events.
+	stateNIDs := make([]int64, len(prevStates))
+	for i, state := range prevStates {
+		stateNIDs[i] = state.BeforeStateNID
+	}
+	sort.Sort(int64Sorter(stateNIDs))
+	stateNIDs = stateNIDs[:unique(int64Sorter(stateNIDs))]
+	stateDataNIDLists, err := h.db.StateDataNIDs(stateNIDs)
+	if err != nil {
+		return err
+	}
+
+	var stateDataNIDs []int64
+	for _, list := range stateDataNIDLists {
+		stateDataNIDs = append(stateDataNIDs, list.StateDataNIDs...)
+	}
+	sort.Sort(int64Sorter(stateNIDs))
+	stateDataNIDs = stateDataNIDs[:unique(int64Sorter(stateDataNIDs))]
+	stateEntryLists, err := h.db.StateEntries(stateDataNIDs)
+	if err != nil {
+		return err
+	}
+
+	var combined []types.StateEntry
+	for _, prevState := range prevStates {
+		i := sort.Search(len(stateDataNIDLists), func(i int) bool {
+			return stateDataNIDLists[i].StateNID < prevState.BeforeStateNID
+		})
+		list := stateDataNIDLists[i]
+		var fullState []types.StateEntry
+		for _, stateDataNID := range list.StateDataNIDs {
+			i := sort.Search(len(stateEntryLists), func(i int) bool {
+				return stateEntryLists[i].StateDataNID < stateDataNID
+			})
+			fullState = append(fullState, stateEntryLists[i].StateEntries...)
+		}
+		if prevState.EventStateKeyNID != 0 {
+			fullState = append(fullState, prevState.StateEntry)
+		}
+
+		// Stable sort so that the most recent entry for each state key stays
+		// towards the back
+		sort.Stable(sortByStateKey(fullState))
+		// Unique returns the last entry for each state key.
+		fullState = fullState[:unique(sortByStateKey(fullState))]
+		// Add the full state for this StateNID.
+		combined = append(combined, fullState...)
+	}
+
+	// Collect all the entries with the same type and key together.
+	sort.Sort(stateEntrySorter(combined))
+	// Remove duplicate entires.
+	combined = combined[:unique(stateEntrySorter(combined))]
+
+	// Find the conflicts
+	conflicts := duplicateStateKeys(combined)
+	if len(conflicts) > 0 {
+		// 6) There are conflicting state events, for each conflict workout
+		// what the appropriate state event is.
+		panic(fmt.Errorf("HandleState: Not implemented 6"))
+	} else {
+		// 7) There weren't any conflicts.
+	}
+
+	panic(fmt.Errorf("HandleState: Not implemented 7"))
+
+	return nil
+}
+
+func uniquePrevStates(event event) []types.StateAtEvent {
+	result := make([]types.StateAtEvent, len(event.stateAtPrevEvents))
+	for i, state := range event.stateAtPrevEvents {
+		if state.EventStateKeyNID == 0 {
+			// If the event is not a state event then we don't care about its
+			// event ID or type.
+			state.EventNID = 0
+			state.EventTypeNID = 0
+		}
+		result[i] = state
+	}
+	sort.Sort(stateAtEventSorter(result))
+	return result[:unique(stateAtEventSorter(result))]
+}
+
+type sortByStateKey []types.StateEntry
+
+func (s sortByStateKey) Len() int           { return len(s) }
+func (s sortByStateKey) Less(i, j int) bool { return s[i].StateKey.LessThan(s[j].StateKey) }
+func (s sortByStateKey) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+
+type stateEntrySorter []types.StateEntry
+
+func (s stateEntrySorter) Len() int           { return len(s) }
+func (s stateEntrySorter) Less(i, j int) bool { return s[i].LessThan(s[j]) }
+func (s stateEntrySorter) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+
+type stateAtEventSorter []types.StateAtEvent
+
+func (s stateAtEventSorter) Len() int           { return len(s) }
+func (s stateAtEventSorter) Less(i, j int) bool { return s[i].LessThan(s[j]) }
+func (s stateAtEventSorter) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+
+type int64Sorter []int64
+
+func (s int64Sorter) Len() int           { return len(s) }
+func (s int64Sorter) Less(i, j int) bool { return s[i] < s[j] }
+func (s int64Sorter) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+
+// Remove duplicate items from a sorted list.
+// Takes the same interface as sort.Sort
+// Returns the length of the date without duplicates
+// Uses the last occurance of a duplicate.
+// O(n).
+func unique(data sort.Interface) int {
+	length := data.Len()
+	j := 0
+	for i := 1; i < length; i++ {
+		if data.Less(i-1, i) {
+			data.Swap(i-1, j)
 			j++
 		}
 	}
-	a[j] = lastValue
-	j++
-	return a[:j]
+	data.Swap(length-1, j)
+	return j + 1
+}
+
+func duplicateStateKeys(a []types.StateEntry) []types.StateEntry {
+	var result []types.StateEntry
+	j := 0
+	for i := 1; i < len(a); i++ {
+		if a[j].StateKey != a[i].StateKey {
+			result = append(result, a[j:i]...)
+			j = i
+		}
+	}
+	if j != len(a)-1 {
+		result = append(result, a[j:]...)
+	}
+	return result
 }
 
 func (h *InputEventHandler) prepareRegion(kind int, roomNID int64) (regionNID int64, err error) {
@@ -218,7 +391,7 @@ type event struct {
 	// The state event numeric IDs at the event or nil if none were provided.
 	stateBefore []types.StateEntry `json:"-"`
 	// The state entry information for this event.
-	eventStateEntry types.StateEntry `json:"-"`
+	stateAtEvent types.StateAtEvent `json:"-"`
 	// The state for each of the prev events if needed.
 	stateAtPrevEvents []types.StateAtEvent `json:"-"`
 	// The event_id. We need this so that we can check if we already have this
