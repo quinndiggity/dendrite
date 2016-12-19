@@ -77,11 +77,11 @@ func (d *Database) assignEventStateKeyNID(eventStateKey string) (eventStateKeyNI
 }
 
 func (d *Database) StateDataNIDs(stateNIDs []int64) ([]types.StateDataNIDList, error) {
-	panic(fmt.Errorf("Not implemented"))
+	return d.selectStateDataNIDs(stateNIDs)
 }
 
 func (d *Database) StateEntries(stateDataNIDs []int64) ([]types.StateEntryList, error) {
-	panic(fmt.Errorf("Not implemented"))
+	return d.selectStateDataEntries(stateDataNIDs)
 }
 
 func (d *Database) ActiveRegionNID(roomNID int64) (int64, error) {
@@ -90,4 +90,28 @@ func (d *Database) ActiveRegionNID(roomNID int64) (int64, error) {
 
 func (d *Database) CreateNewActiveRegion(roomNID, stateNID int64, forward, backward []int64) (int64, error) {
 	panic(fmt.Errorf("Not impelemented"))
+}
+
+func (d *Database) AddState(roomNID int64, stateDataNIDs []int64, state []types.StateEntry) (int64, error) {
+	var allStateDataNIDs []int64
+	if len(state) != 0 {
+		newStateDataNID, err := d.selectNextStateDataNID()
+		if err != nil {
+			return 0, err
+		}
+		err = d.insertStateData(newStateDataNID, state)
+		if err != nil {
+			return 0, err
+		}
+		allStateDataNIDs = make([]int64, len(stateDataNIDs)+1)
+		copy(allStateDataNIDs, stateDataNIDs)
+		allStateDataNIDs[len(stateDataNIDs)] = newStateDataNID
+	} else {
+		allStateDataNIDs = stateDataNIDs
+	}
+	return d.insertState(roomNID, allStateDataNIDs)
+}
+
+func (d *Database) SetEventState(eventNID, stateNID int64) error {
+	return d.updateEventState(eventNID, stateNID)
 }

@@ -45,6 +45,12 @@ type InputEventHandlerDatabase interface {
 	// Lookup the state data for each numeric state data ID
 	// The returned slice is sorted by numeric state data ID.
 	StateEntries(stateDataNIDs []int64) ([]types.StateEntryList, error)
+
+	// Add the state to the database.
+	AddState(roomNID int64, stateDataNIDs []int64, state []types.StateEntry) (stateNID int64, err error)
+
+	// Set the state for the event.
+	SetEventState(eventNID, stateNID int64) error
 }
 
 type InputEventHandler struct {
@@ -76,7 +82,7 @@ func (h *InputEventHandler) Handle(input *api.InputEvent) error {
 	}
 
 	// 3) Insert the event and assign it a NID.
-	err = h.storeEvent(roomNID, event)
+	stateAtEvent, err := h.storeEvent(roomNID, event)
 	if err != nil {
 		return err
 	}
@@ -88,9 +94,18 @@ func (h *InputEventHandler) Handle(input *api.InputEvent) error {
 
 	// 5) Store the state for before the event. If the state wasn't given in
 	//    input then we will need to calculate it from the prev_events.
-	err = h.handleState(event)
-	if err != nil {
-		return err
+	if stateAtEvent.BeforeStateNID == 0 {
+		stateNID, err := h.handleState(roomNID, event)
+		if err != nil {
+			return err
+		}
+		err = h.db.SetEventState(stateAtEvent.EventNID, stateNID)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Happy days, we have already stored state for the event.
+		// TOCONSIDER: Does the state at an event ever need to change?
 	}
 
 	// 6) Get the active region for the room and update it with the event.
@@ -169,48 +184,59 @@ func (h *InputEventHandler) prepareRoom(kind int, roomID string) (roomNID int64,
 	return
 }
 
-func (h *InputEventHandler) storeEvent(roomNID int64, event event) (err error) {
-	event.stateAtEvent, err = h.db.AddEvent(
+func (h *InputEventHandler) storeEvent(roomNID int64, event event) (types.StateAtEvent, error) {
+	return h.db.AddEvent(
 		event.raw, event.EventID, roomNID, event.Depth,
 		event.Type, event.StateKey,
 	)
-	return
 }
 
-func (h *InputEventHandler) handleState(event event) error {
-	if event.stateAtEvent.BeforeStateNID != 0 {
-		// 1) Happy days, we have already stored state for the event.
-		return nil
-	}
-	if event.stateBefore != nil {
-		return nil
+const (
+	// The maximum number of state data blocks to compose when encoding the
+	// state at an event. If this is too small then it becomes harder to
+	// benefit from delta encoding. If this is too large then more state data
+	// blocks have to be fetched when loading.
+	maxStateDataNIDs = 64
+)
 
-		// 2) We've been given the state, we just need to store it.
-		panic(fmt.Errorf("handleState: Not implemented 2"))
-		return nil
+func (h *InputEventHandler) handleState(roomNID int64, event event) (int64, error) {
+	if event.stateBefore != nil {
+		// 1) We've been given the state, we just need to store it.
+		// TODO: If this state is part of a backfill it may be possible
+		// to delta encode it against the more recent state. We'd need
+		// to have a copy of the newer state.
+		return h.db.AddState(roomNID, nil, event.stateBefore)
 	}
 	// We need to work out the state using the supplied information.
 	prevStates := uniquePrevStates(event)
 	if len(prevStates) == 1 {
 		prevState := prevStates[0]
 		if prevState.EventStateKeyNID == 0 {
-			// 3) None of the previous events were state events and they all
+			// 2) None of the previous events were state events and they all
 			// have the same state, so this event has exactly the same state
 			// as the previous events.
 			// This should be the common case.
-			panic(fmt.Errorf("handleState: Not implemented 3"))
-			return nil
+			return prevState.BeforeStateNID, nil
 		}
-		// 4) The previous event was a state event so we need to store a copy
+		// 3) The previous event was a state event so we need to store a copy
 		// of the previous state updated with that event.
-		panic(fmt.Errorf("handleState: Not implemented 4"))
-		return nil
+		stateDataNIDLists, err := h.db.StateDataNIDs([]int64{prevState.BeforeStateNID})
+		if err != nil {
+			return 0, err
+		}
+		stateDataNIDs := stateDataNIDLists[0].StateDataNIDs
+		if len(stateDataNIDs) < maxStateDataNIDs {
+			return h.db.AddState(
+				roomNID, stateDataNIDs, []types.StateEntry{prevState.StateEntry},
+			)
+		}
+		// If there are too many deltas then we need to calculate the full state.
 	}
 	if len(prevStates) == 0 {
-		// 5) There weren't any prev_events for this event so the state is
+		// 4) There weren't any prev_events for this event so the state is
 		// empty.
-		panic(fmt.Errorf("handleState: Not implemented 5"))
-		return nil
+		panic(fmt.Errorf("handleState: Not implemented 4"))
+		return 0, nil
 	}
 	// Conflict resolution.
 	// First stage: load the state maps for the prev events.
@@ -222,7 +248,7 @@ func (h *InputEventHandler) handleState(event event) error {
 	stateNIDs = stateNIDs[:unique(int64Sorter(stateNIDs))]
 	stateDataNIDLists, err := h.db.StateDataNIDs(stateNIDs)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	var stateDataNIDs []int64
@@ -233,21 +259,21 @@ func (h *InputEventHandler) handleState(event event) error {
 	stateDataNIDs = stateDataNIDs[:unique(int64Sorter(stateDataNIDs))]
 	stateEntryLists, err := h.db.StateEntries(stateDataNIDs)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	var combined []types.StateEntry
 	for _, prevState := range prevStates {
 		i := sort.Search(len(stateDataNIDLists), func(i int) bool {
-			return stateDataNIDLists[i].StateNID < prevState.BeforeStateNID
+			return stateDataNIDLists[i].StateNID >= prevState.BeforeStateNID
 		})
 		list := stateDataNIDLists[i]
 		var fullState []types.StateEntry
 		for _, stateDataNID := range list.StateDataNIDs {
-			i := sort.Search(len(stateEntryLists), func(i int) bool {
-				return stateEntryLists[i].StateDataNID < stateDataNID
+			j := sort.Search(len(stateEntryLists), func(j int) bool {
+				return stateEntryLists[j].StateDataNID >= stateDataNID
 			})
-			fullState = append(fullState, stateEntryLists[i].StateEntries...)
+			fullState = append(fullState, stateEntryLists[j].StateEntries...)
 		}
 		if prevState.EventStateKeyNID != 0 {
 			fullState = append(fullState, prevState.StateEntry)
@@ -270,16 +296,16 @@ func (h *InputEventHandler) handleState(event event) error {
 	// Find the conflicts
 	conflicts := duplicateStateKeys(combined)
 	if len(conflicts) > 0 {
-		// 6) There are conflicting state events, for each conflict workout
+		// 5) There are conflicting state events, for each conflict workout
 		// what the appropriate state event is.
-		panic(fmt.Errorf("HandleState: Not implemented 6"))
+		panic(fmt.Errorf("HandleState: Not implemented 5"))
 	} else {
-		// 7) There weren't any conflicts.
+		// 6) There weren't any conflicts.
 	}
 
-	panic(fmt.Errorf("HandleState: Not implemented 7"))
+	panic(fmt.Errorf("HandleState: Not implemented 6"))
 
-	return nil
+	return 0, nil
 }
 
 func uniquePrevStates(event event) []types.StateAtEvent {

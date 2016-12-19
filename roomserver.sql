@@ -161,9 +161,10 @@ INSERT INTO event_state_keys (event_state_key) VALUES ('');
 -- the state as deltas.
 -- If the list of deltas becomes too long it may become more efficient to
 -- the full state under single state_data_nid.
+CREATE SEQUENCE state_nid_seq;
 CREATE TABLE state (
     -- Local numeric ID for the state.
-    state_nid bigint NOT NULL PRIMARY KEY,
+    state_nid bigint PRIMARY KEY DEFAULT nextval('state_nid_seq'),
     -- Local numeric ID of the room this state is for.
     -- Unused in normal operation, but potentially useful for background work.
     room_nid bigint NOT NULL,
@@ -180,6 +181,7 @@ CREATE TABLE state (
 -- lookup a specific (type, state_key) pair for an event. It also makes it easy
 -- to read the state for a given state_data_nid ordered by (type, state_key)
 -- which in turn makes it easier to merge state data blocks.
+CREATE SEQUENCE state_data_nid_seq;
 CREATE TABLE state_data (
     -- Local numeric ID for this state data.
     state_data_nid bigint NOT NULL,
