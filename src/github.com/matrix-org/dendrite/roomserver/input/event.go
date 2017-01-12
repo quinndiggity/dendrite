@@ -338,7 +338,7 @@ func (m stateDataNIDListMap) lookup(stateNID int64) (stateDataNIDs []int64, ok b
 	i := sort.Search(len(list), func(i int) bool {
 		return list[i].StateNID >= stateNID
 	})
-	if list[i].StateNID == stateNID {
+	if i < len(list) && list[i].StateNID == stateNID {
 		ok = true
 		stateDataNIDs = list[i].StateDataNIDs
 	}
@@ -356,7 +356,7 @@ func (m stateEntryListMap) lookup(stateDataNID int64) (stateEntries []types.Stat
 	i := sort.Search(len(list), func(i int) bool {
 		return list[i].StateDataNID >= stateDataNID
 	})
-	if list[i].StateDataNID == stateDataNID {
+	if i < len(list) && list[i].StateDataNID == stateDataNID {
 		ok = true
 		stateEntries = list[i].StateEntries
 	}

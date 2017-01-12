@@ -116,8 +116,8 @@ func (d *Database) SetEventState(eventNID, stateNID int64) error {
 	return d.updateEventState(eventNID, stateNID)
 }
 
-func (d *Database) EventStateKeyNIDs(stateKeys []string) ([]types.IDPair, error) {
-	return d.selectEventStateKeyNIDs(stateKeys)
+func (d *Database) EventStateKeyNIDs(eventStateKeys []string) ([]types.IDPair, error) {
+	return d.selectEventStateKeyNIDs(eventStateKeys)
 }
 
 func (d *Database) EventJSONs(eventNIDs []int64) ([]types.EventJSON, error) {

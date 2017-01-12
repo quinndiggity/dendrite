@@ -101,7 +101,7 @@ func resolveConflictBlocks(
 		}
 		var block []types.StateEntry
 		i := 0
-		for i < len(conflicted) && block[i].StateKey == blockKey {
+		for i < len(conflicted) && conflicted[i].StateKey == blockKey {
 			block = append(block, conflicted[i])
 			i++
 		}
@@ -418,7 +418,7 @@ func (m stateEntryMap) lookup(stateKey types.StateKey) (eventNID int64, ok bool)
 	i := sort.Search(len(list), func(i int) bool {
 		return !list[i].StateKey.LessThan(stateKey)
 	})
-	if list[i].StateKey == stateKey {
+	if i < len(list) && list[i].StateKey == stateKey {
 		ok = true
 		eventNID = list[i].EventNID
 	}
@@ -429,7 +429,7 @@ func lookupEventNID(eventJSONs []types.EventJSON, eventNID int64) (index int, ok
 	i := sort.Search(len(eventJSONs), func(i int) bool {
 		return eventJSONs[i].EventNID >= eventNID
 	})
-	if eventJSONs[i].EventNID == eventNID {
+	if i < len(eventJSONs) && eventJSONs[i].EventNID == eventNID {
 		ok = true
 		index = i
 	}
