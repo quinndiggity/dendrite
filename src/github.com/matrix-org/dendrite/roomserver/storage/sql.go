@@ -7,22 +7,24 @@ import (
 )
 
 type stmts struct {
-	insertRoomNIDStmt          *sql.Stmt
-	selectRoomNIDStmt          *sql.Stmt
-	selectStateAtEventIDsStmt  *sql.Stmt
-	selectStateEventsStmt      *sql.Stmt
-	insertEventTypeNIDStmt     *sql.Stmt
-	selectEventTypeNIDStmt     *sql.Stmt
-	insertEventStateKeyNIDStmt *sql.Stmt
-	selectEventStateKeyNIDStmt *sql.Stmt
-	insertEventStmt            *sql.Stmt
-	insertEventJSONStmt        *sql.Stmt
-	selectNextStateDataNIDStmt *sql.Stmt
-	insertStateDataStmt        *sql.Stmt
-	insertStateStmt            *sql.Stmt
-	updateEventStateStmt       *sql.Stmt
-	selectStateDataNIDsStmt    *sql.Stmt
-	selectStateDataEntriesStmt *sql.Stmt
+	insertRoomNIDStmt           *sql.Stmt
+	selectRoomNIDStmt           *sql.Stmt
+	selectStateAtEventIDsStmt   *sql.Stmt
+	selectStateEventsStmt       *sql.Stmt
+	insertEventTypeNIDStmt      *sql.Stmt
+	selectEventTypeNIDStmt      *sql.Stmt
+	insertEventStateKeyNIDStmt  *sql.Stmt
+	selectEventStateKeyNIDStmt  *sql.Stmt
+	insertEventStmt             *sql.Stmt
+	insertEventJSONStmt         *sql.Stmt
+	selectNextStateDataNIDStmt  *sql.Stmt
+	insertStateDataStmt         *sql.Stmt
+	insertStateStmt             *sql.Stmt
+	updateEventStateStmt        *sql.Stmt
+	selectStateDataNIDsStmt     *sql.Stmt
+	selectStateDataEntriesStmt  *sql.Stmt
+	selectEventStateKeyNIDsStmt *sql.Stmt
+	selectEventJSONsStmt        *sql.Stmt
 }
 
 func (s *stmts) prepare(db *sql.DB) (err error) {
@@ -104,6 +106,16 @@ func (s *stmts) prepare(db *sql.DB) (err error) {
 		"SELECT state_data_nid, event_type_nid, event_state_key_nid, event_nid" +
 			" FROM state_data WHERE state_data_nid = ANY($1)" +
 			" ORDER BY state_data_nid, event_type_nid, event_state_key_nid",
+	)
+	s.selectEventStateKeyNIDsStmt = p(
+		"SELECT event_state_key, event_state_key_nid FROM event_state_keys" +
+			" WHERE event_state_key = ANY($1)" +
+			" ORDER BY event_state_key",
+	)
+	s.selectEventJSONsStmt = p(
+		"SELECT event_nid, event_json FROM event_json" +
+			" WHERE event_nid = ANY($1)" +
+			" ORDER BY event_nid",
 	)
 	return
 }
@@ -269,6 +281,42 @@ func (s *stmts) selectStateDataEntries(stateDataNIDs []int64) ([]types.StateEntr
 			i++
 		}
 		current.StateEntries = append(current.StateEntries, entry)
+	}
+	return results[:i], nil
+}
+
+func (s *stmts) selectEventStateKeyNIDs(eventStateKeys []string) ([]types.IDPair, error) {
+	rows, err := s.selectEventStateKeyNIDsStmt.Query(pq.StringArray(eventStateKeys))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]types.IDPair, len(eventStateKeys))
+	i := 0
+	for rows.Next() {
+		if err := rows.Scan(&results[i].ID, &results[i].NID); err != nil {
+			return nil, err
+		}
+		i++
+	}
+	return results[:i], nil
+}
+
+func (s *stmts) selectEventJSONs(eventNIDs []int64) ([]types.EventJSON, error) {
+	rows, err := s.selectEventJSONsStmt.Query(pq.Int64Array(eventNIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]types.EventJSON, len(eventNIDs))
+	i := 0
+	for rows.Next() {
+		if err := rows.Scan(&results[i].EventNID, &results[i].EventJSON); err != nil {
+			return nil, err
+		}
+		i++
 	}
 	return results[:i], nil
 }

@@ -9,6 +9,8 @@ import (
 )
 
 type InputEventHandlerDatabase interface {
+	ConflictResolutionDatabase
+
 	// Add a new room to the database.
 	// The room starts off without an active region.
 	CreateNewRoom(roomID string) (roomNID int64, err error)
@@ -244,9 +246,7 @@ func (h *InputEventHandler) handleState(roomNID int64, event event) (int64, erro
 	for i, state := range prevStates {
 		stateNIDs[i] = state.BeforeStateNID
 	}
-	sort.Sort(int64Sorter(stateNIDs))
-	stateNIDs = stateNIDs[:unique(int64Sorter(stateNIDs))]
-	stateDataNIDLists, err := h.db.StateDataNIDs(stateNIDs)
+	stateDataNIDLists, err := h.db.StateDataNIDs(uniqueNIDs(stateNIDs))
 	if err != nil {
 		return 0, err
 	}
@@ -255,25 +255,32 @@ func (h *InputEventHandler) handleState(roomNID int64, event event) (int64, erro
 	for _, list := range stateDataNIDLists {
 		stateDataNIDs = append(stateDataNIDs, list.StateDataNIDs...)
 	}
-	sort.Sort(int64Sorter(stateNIDs))
-	stateDataNIDs = stateDataNIDs[:unique(int64Sorter(stateDataNIDs))]
-	stateEntryLists, err := h.db.StateEntries(stateDataNIDs)
+	stateEntryLists, err := h.db.StateEntries(uniqueNIDs(stateDataNIDs))
 	if err != nil {
 		return 0, err
 	}
 
+	stateDataNIDsMap := newStateDataNIDListMap(stateDataNIDLists)
+	stateEntriesMap := newStateEntryListMap(stateEntryLists)
+
 	var combined []types.StateEntry
 	for _, prevState := range prevStates {
-		i := sort.Search(len(stateDataNIDLists), func(i int) bool {
-			return stateDataNIDLists[i].StateNID >= prevState.BeforeStateNID
-		})
-		list := stateDataNIDLists[i]
+		list, ok := stateDataNIDsMap.lookup(prevState.BeforeStateNID)
+		if !ok {
+			// This should only get hit if the database is corrupt.
+			// It should be impossible for an event to reference a NID that doesn't exist
+			panic(fmt.Errorf("Corrupt DB: Missing state numeric ID %d", prevState.BeforeStateNID))
+		}
+
 		var fullState []types.StateEntry
-		for _, stateDataNID := range list.StateDataNIDs {
-			j := sort.Search(len(stateEntryLists), func(j int) bool {
-				return stateEntryLists[j].StateDataNID >= stateDataNID
-			})
-			fullState = append(fullState, stateEntryLists[j].StateEntries...)
+		for _, stateDataNID := range list {
+			entries, ok := stateEntriesMap.lookup(stateDataNID)
+			if !ok {
+				// This should only get hit if the database is corrupt.
+				// It should be impossible for an event to reference a NID that doesn't exist
+				panic(fmt.Errorf("Corrupt DB: Missing state numeric ID %d", prevState.BeforeStateNID))
+			}
+			fullState = append(fullState, entries...)
 		}
 		if prevState.EventStateKeyNID != 0 {
 			fullState = append(fullState, prevState.StateEntry)
@@ -295,17 +302,65 @@ func (h *InputEventHandler) handleState(roomNID int64, event event) (int64, erro
 
 	// Find the conflicts
 	conflicts := duplicateStateKeys(combined)
+
+	var state []types.StateEntry
 	if len(conflicts) > 0 {
 		// 5) There are conflicting state events, for each conflict workout
 		// what the appropriate state event is.
-		panic(fmt.Errorf("HandleState: Not implemented 5"))
+		resolved, err := resolveConflicts(h.db, combined, conflicts)
+		if err != nil {
+			return 0, err
+		}
+		state = resolved
 	} else {
-		// 6) There weren't any conflicts.
+		// 6) There weren't any conflicts
+		state = combined
 	}
 
-	panic(fmt.Errorf("HandleState: Not implemented 6"))
+	// TODO: Check if we can encode the new state as a delta against the
+	// previous state.
+	return h.db.AddState(roomNID, nil, state)
+}
 
-	return 0, nil
+func uniqueNIDs(nids []int64) []int64 {
+	sort.Sort(int64Sorter(nids))
+	return nids[:unique(int64Sorter(nids))]
+}
+
+type stateDataNIDListMap []types.StateDataNIDList
+
+func newStateDataNIDListMap(stateDataNIDLists []types.StateDataNIDList) stateDataNIDListMap {
+	return stateDataNIDListMap(stateDataNIDLists)
+}
+
+func (m stateDataNIDListMap) lookup(stateNID int64) (stateDataNIDs []int64, ok bool) {
+	list := []types.StateDataNIDList(m)
+	i := sort.Search(len(list), func(i int) bool {
+		return list[i].StateNID >= stateNID
+	})
+	if list[i].StateNID == stateNID {
+		ok = true
+		stateDataNIDs = list[i].StateDataNIDs
+	}
+	return
+}
+
+type stateEntryListMap []types.StateEntryList
+
+func newStateEntryListMap(stateEntryLists []types.StateEntryList) stateEntryListMap {
+	return stateEntryListMap(stateEntryLists)
+}
+
+func (m stateEntryListMap) lookup(stateDataNID int64) (stateEntries []types.StateEntry, ok bool) {
+	list := []types.StateEntryList(m)
+	i := sort.Search(len(list), func(i int) bool {
+		return list[i].StateDataNID >= stateDataNID
+	})
+	if list[i].StateDataNID == stateDataNID {
+		ok = true
+		stateEntries = list[i].StateEntries
+	}
+	return
 }
 
 func uniquePrevStates(event event) []types.StateAtEvent {
@@ -353,6 +408,9 @@ func (s int64Sorter) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // Uses the last occurance of a duplicate.
 // O(n).
 func unique(data sort.Interface) int {
+	if data.Len() == 0 {
+		return 0
+	}
 	length := data.Len()
 	j := 0
 	for i := 1; i < length; i++ {

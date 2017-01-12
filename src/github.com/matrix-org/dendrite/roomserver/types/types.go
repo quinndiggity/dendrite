@@ -50,3 +50,13 @@ type StateEntryList struct {
 	StateDataNID int64
 	StateEntries []StateEntry
 }
+
+type IDPair struct {
+	ID  string
+	NID int64
+}
+
+type EventJSON struct {
+	EventNID  int64
+	EventJSON []byte
+}

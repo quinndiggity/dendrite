@@ -115,3 +115,11 @@ func (d *Database) AddState(roomNID int64, stateDataNIDs []int64, state []types.
 func (d *Database) SetEventState(eventNID, stateNID int64) error {
 	return d.updateEventState(eventNID, stateNID)
 }
+
+func (d *Database) EventStateKeyNIDs(stateKeys []string) ([]types.IDPair, error) {
+	return d.selectEventStateKeyNIDs(stateKeys)
+}
+
+func (d *Database) EventJSONs(eventNIDs []int64) ([]types.EventJSON, error) {
+	return d.selectEventJSONs(eventNIDs)
+}
