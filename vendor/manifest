@@ -1,0 +1,31 @@
+{
+	"version": 0,
+	"dependencies": [
+		{
+			"importpath": "github.com/lib/pq",
+			"repository": "https://github.com/lib/pq",
+			"revision": "4a82388ebc5138c8289fe9bc602cb0b3e32cd617",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/matrix-org/gomatrixserverlib",
+			"repository": "https://github.com/matrix-org/gomatrixserverlib",
+			"revision": "f36473f74f14325c44549ed7b909747e5b32e9ae",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/matrix-org/gomatrixserverlib/eventauth",
+			"repository": "https://github.com/matrix-org/gomatrixserverlib",
+			"revision": "72f09f2bf0331af7f75730abdecf3fdf6dac7a2f",
+			"branch": "master",
+			"path": "/eventauth"
+		},
+		{
+			"importpath": "golang.org/x/crypto/ed25519",
+			"repository": "https://go.googlesource.com/crypto",
+			"revision": "7c6cc321c680f03b9ef0764448e780704f486b51",
+			"branch": "master",
+			"path": "/ed25519"
+		}
+	]
+}
