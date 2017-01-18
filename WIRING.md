@@ -8,6 +8,8 @@ The diagram is incomplete. The following things aren't shown on the diagram:
  - [ ] Sending federation.
  - [ ] Other things that aren't shown on the diagram.
 
+Diagram:
+
 
     W -> Writer
     S -> Server/Store/Service/Something/Stuff
