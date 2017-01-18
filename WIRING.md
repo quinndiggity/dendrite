@@ -1,7 +1,16 @@
-Wiring:
+# Wiring
+
+The diagram is incomplete. The following things aren't shown on the diagram:
+
+ - [ ] Device Messages
+ - [ ] User Profiles
+ - [ ] Notification Counts
+ - [ ] Sending federation.
+ - [ ] Other things that aren't shown on the diagram.
+
 
     W -> Writer
-    S -> Store or Server or Service or Something
+    S -> Server/Store/Service/Something/Stuff
     R -> Reader
 
                +---+                                                    +---+                              +---+
