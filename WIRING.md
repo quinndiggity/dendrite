@@ -85,6 +85,9 @@ Many of the components are logical rather than physical. For example it is
 possible that all of the client API writers will end up being glued together
 and always deployed as a single unit.
 
+Outbound federation requests will probably need to be funnelled through a
+choke-point to implement ratelimiting and backoff correctly.
+
 ## Federation Send
 
  * Handles `/federation/v1/send/` requests.
