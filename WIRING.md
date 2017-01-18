@@ -81,6 +81,10 @@ Diagram:
 
 # Component Descriptions
 
+Many of the components are logical rather than physical. For example it is
+possible that all of the client API writers will end up being glued together
+and always deployed as a single unit.
+
 ## Federation Send
 
  * Handles `/federation/v1/send/` requests.
@@ -142,6 +146,8 @@ Diagram:
    current receipt markers move with each update.
  * Writes the new marker positions to logs
  * Shards by room ID?
+ * It may be impossible to implement without folding it into the Room Server
+   forever coupling the components together.
 
 ## Typing Server
 
