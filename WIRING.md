@@ -1,5 +1,9 @@
 Wiring:
 
+    W -> Writer
+    S -> Store or Server or Service or Something
+    R -> Reader
+
                +---+                                                    +---+                              +---+
     +----------| W |                                         +----------| S |                     +--------| R |
     |          +---+                                         | Receipts +---+                     | Client +---+
